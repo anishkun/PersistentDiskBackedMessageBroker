@@ -24,17 +24,21 @@ public class DiskQueue {
         this.durable = durable;
     }
 
-    public synchronized void enqueue(String message) throws IOException {
-        byte[] data = message.getBytes(StandardCharsets.UTF_8);
+    private final ThreadLocal<ByteBuffer> localBuffer = ThreadLocal.withInitial(
+            () -> ByteBuffer.allocateDirect(MAX_MESSAGE_SIZE + 4)
+    );
+
+    public synchronized void enqueue(byte[] data) throws IOException {
         int length = data.length;
 
         if (length > MAX_MESSAGE_SIZE)
             throw new IOException("Message too large: " + length);
 
-        ByteBuffer buffer = ByteBuffer.allocate(4 + length);
-        buffer.putInt(length);
-        buffer.put(data);
-        buffer.flip();
+        ByteBuffer buffer = localBuffer.get();
+        buffer.clear();              // reset for this write
+        buffer.putInt(length);       // write header
+        buffer.put(data);            // write payload
+        buffer.flip();               // switch to reading mode for FileChannel.write
 
         while (buffer.hasRemaining()) {
             writeChannel.write(buffer);
@@ -48,6 +52,12 @@ public class DiskQueue {
             }
         }
     }
+
+    // OPTIONAL: convenience String version
+    public void enqueue(String message) throws IOException {
+        enqueue(message.getBytes(StandardCharsets.UTF_8));
+    }
+
 
     public synchronized String dequeue() throws IOException {
         ByteBuffer lenBuf = ByteBuffer.allocate(4);
