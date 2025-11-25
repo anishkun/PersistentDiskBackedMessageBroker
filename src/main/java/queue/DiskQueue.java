@@ -10,28 +10,50 @@ import java.nio.file.StandardOpenOption;
 public class DiskQueue {
     private static final int MAX_MESSAGE_SIZE = 10 * 1024 * 1024; // 10 MB
     private static final int BATCH_LIMIT = 100; // flush every 100 messages
+    private final int maxMessageSize;
+    private final int batchLimit;
+
 
     private final FileChannel writeChannel;
     private final FileChannel readChannel;
     private final boolean durable;
     private int batchCounter = 0;
 
-    public DiskQueue(Path filePath, boolean durable) throws IOException {
+    public DiskQueue(Path filePath, boolean durable, int maxMessageSize, int batchLimit) throws IOException {
         this.writeChannel = FileChannel.open(filePath,
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND);
         this.readChannel = FileChannel.open(filePath,
                 StandardOpenOption.READ);
+
         this.durable = durable;
+        this.maxMessageSize = maxMessageSize;
+        this.batchLimit = batchLimit;
+        this.batchCounter = 0;
+
+        this.localBuffer = ThreadLocal.withInitial(
+                () -> ByteBuffer.allocateDirect(maxMessageSize + 4)
+        );
+
+        this.readBuffer = ThreadLocal.withInitial(
+                () -> ByteBuffer.allocateDirect(maxMessageSize)
+        );
     }
 
-    private final ThreadLocal<ByteBuffer> localBuffer = ThreadLocal.withInitial(
-            () -> ByteBuffer.allocateDirect(MAX_MESSAGE_SIZE + 4)
-    );
+
+    public DiskQueue(Path filePath, boolean durable) throws IOException {
+        this(filePath, durable, MAX_MESSAGE_SIZE, BATCH_LIMIT);
+    }
+
+
+    private ThreadLocal<ByteBuffer> localBuffer;
+    private ThreadLocal<ByteBuffer> readBuffer;
+
+
 
     public synchronized void enqueue(byte[] data) throws IOException {
         int length = data.length;
 
-        if (length > MAX_MESSAGE_SIZE)
+        if (length > maxMessageSize)
             throw new IOException("Message too large: " + length);
 
         ByteBuffer buffer = localBuffer.get();
@@ -46,7 +68,7 @@ public class DiskQueue {
 
         if (durable) {
             batchCounter++;
-            if (batchCounter >= BATCH_LIMIT) {
+            if (batchCounter >= batchLimit) {
                 writeChannel.force(false);
                 batchCounter = 0;
             }
@@ -60,28 +82,43 @@ public class DiskQueue {
 
 
     public synchronized String dequeue() throws IOException {
-        ByteBuffer lenBuf = ByteBuffer.allocate(4);
-        while (lenBuf.hasRemaining()) {
-            int r = readChannel.read(lenBuf);
+        // Reusable read buffer
+        ByteBuffer buffer = readBuffer.get();
+
+        // --- READ LENGTH (4 bytes) ---
+        buffer.clear();
+        buffer.limit(4);
+
+        while (buffer.hasRemaining()) {
+            int r = readChannel.read(buffer);
             if (r == -1) return null; // EOF
         }
 
-        lenBuf.flip();
-        int length = lenBuf.getInt();
-        if (length < 0 || length > MAX_MESSAGE_SIZE)
-            throw new IOException("Corrupt length: " + length);
+        buffer.flip();
+        int length = buffer.getInt();
 
-        ByteBuffer msgBuf = ByteBuffer.allocate(length);
-        while (msgBuf.hasRemaining()) {
-            int r = readChannel.read(msgBuf);
-            if (r == -1) throw new IOException("Unexpected EOF in message");
+        if (length < 0 || length > maxMessageSize) {
+            throw new IOException("Corrupt length: " + length);
         }
 
-        msgBuf.flip();
+        // --- READ PAYLOAD ---
+        buffer.clear();
+        buffer.limit(length);
+
+        while (buffer.hasRemaining()) {
+            int r = readChannel.read(buffer);
+            if (r == -1) throw new IOException("Unexpected EOF while reading message");
+        }
+
+        buffer.flip();
+
+        // Extract data into a byte[] (needed for String)
         byte[] data = new byte[length];
-        msgBuf.get(data);
+        buffer.get(data);
+
         return new String(data, StandardCharsets.UTF_8);
     }
+
 
     /** Optional manual flush for durability */
     public synchronized void flush() throws IOException {
@@ -92,7 +129,7 @@ public class DiskQueue {
     }
 
     public void close() throws IOException {
-        flush();
+        if (durable) flush();
         writeChannel.close();
         readChannel.close();
     }
