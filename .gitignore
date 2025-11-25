@@ -30,5 +30,4 @@ desktop.ini
 # ------------------------------
 # Environment / credentials (if any)
 # ------------------------------
-*.env
-*.properties.local
+*.en*
