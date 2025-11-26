@@ -17,8 +17,9 @@ public class DiskQueueBenchmark {
     public static void main(String[] args) throws Exception {
         Path path = Path.of("benchmark_queue.dat");
 
-        int messages = 100_000;
-        int messageSize = 200;
+        int messages = 10_000;
+        int messageSize = 10 * 1024;  // 10 KB messages
+
         boolean durable = true;
         int batchLimit = 100;
         int maxMessageSize = 10 * 1024 * 1024;
