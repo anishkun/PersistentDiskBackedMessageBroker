@@ -81,7 +81,7 @@ public class DiskQueue {
     }
 
 
-    public synchronized String dequeue() throws IOException {
+    public synchronized byte[] dequeue() throws IOException {
         // Reusable read buffer
         ByteBuffer buffer = readBuffer.get();
 
@@ -116,7 +116,7 @@ public class DiskQueue {
         byte[] data = new byte[length];
         buffer.get(data);
 
-        return new String(data, StandardCharsets.UTF_8);
+        return data;
     }
 
 
