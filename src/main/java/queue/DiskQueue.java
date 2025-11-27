@@ -82,6 +82,12 @@ public class DiskQueue {
 
 
     public synchronized byte[] dequeue() throws IOException {
+        long start = readChannel.position();
+        long fileSize = writeChannel.size();
+
+        // --- PARTIAL TAIL PROTECTION ---
+        if (start + 4 > fileSize) return null; // Not enough bytes for header
+
         // Reusable read buffer
         ByteBuffer buffer = readBuffer.get();
 
@@ -91,15 +97,19 @@ public class DiskQueue {
 
         while (buffer.hasRemaining()) {
             int r = readChannel.read(buffer);
-            if (r == -1) return null; // EOF
+            if (r == -1) return null; // EOF (no full header)
         }
 
         buffer.flip();
         int length = buffer.getInt();
 
-        if (length < 0 || length > maxMessageSize) {
+        // Validate header
+        if (length < 0 || length > maxMessageSize)
             throw new IOException("Corrupt length: " + length);
-        }
+
+        // --- PARTIAL TAIL PROTECTION #2 ---
+        if (start + 4 + length > fileSize)
+            return null; // Partial record — writer hasn't finished
 
         // --- READ PAYLOAD ---
         buffer.clear();
@@ -107,17 +117,15 @@ public class DiskQueue {
 
         while (buffer.hasRemaining()) {
             int r = readChannel.read(buffer);
-            if (r == -1) throw new IOException("Unexpected EOF while reading message");
+            if (r == -1) throw new IOException("Unexpected EOF while reading payload");
         }
 
         buffer.flip();
-
-        // Extract data into a byte[] (needed for String)
         byte[] data = new byte[length];
         buffer.get(data);
-
         return data;
     }
+
 
 
     /** Optional manual flush for durability */
