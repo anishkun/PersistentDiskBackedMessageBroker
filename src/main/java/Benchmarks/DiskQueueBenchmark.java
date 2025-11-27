@@ -62,7 +62,7 @@ public class DiskQueueBenchmark {
         int readCount = 0;
 
         while (true) {
-            String msg = queue.dequeue();
+            byte[] msg = queue.dequeue();   // <-- changed from String to byte[]
             if (msg == null) break;
             readCount++;
         }

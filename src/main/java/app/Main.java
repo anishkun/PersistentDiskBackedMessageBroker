@@ -25,7 +25,7 @@ public class Main {
             queue = new DiskQueue(Paths.get("queue.log"), true);
 
             // Reading messages back
-            String msg;
+            byte[] msg;
             while ((msg = queue.dequeue()) != null) {
                 System.out.println("Read from disk: " + msg);
             }
