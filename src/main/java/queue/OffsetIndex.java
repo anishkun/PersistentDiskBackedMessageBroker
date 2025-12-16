@@ -21,6 +21,8 @@ public final class OffsetIndex {
     // In-memory sparse index (monotonic)
     private final List<Long> logicalOffsets = new ArrayList<>();
     private final List<Long> physicalOffsets = new ArrayList<>();
+    private final ByteBuffer readBuffer  = ByteBuffer.allocate(ENTRY_SIZE);
+    private final ByteBuffer writeBuffer = ByteBuffer.allocate(ENTRY_SIZE);
 
     public OffsetIndex(Path indexFile) throws IOException {
         this.channel = FileChannel.open(indexFile, CREATE, READ, WRITE);
@@ -30,21 +32,30 @@ public final class OffsetIndex {
     // -------- Startup loading --------
     private void loadExistingEntries() throws IOException {
         long size = channel.size();
+
+        // Truncate partial entry (crash safety)
         if (size % ENTRY_SIZE != 0) {
-            // Truncate partial entry (crash safety)
             channel.truncate(size - (size % ENTRY_SIZE));
         }
 
-        ByteBuffer buf = ByteBuffer.allocate(ENTRY_SIZE);
         channel.position(0);
 
         while (channel.position() < channel.size()) {
-            buf.clear();
-            readFully(buf);
-            buf.flip();
+            readBuffer.clear();
+            readFully(readBuffer);
+            readBuffer.flip();
 
-            long logical = buf.getLong();
-            long physical = buf.getLong();
+            long logical  = readBuffer.getLong();
+            long physical = readBuffer.getLong();
+
+            // Monotonicity check (defensive)
+            if (!logicalOffsets.isEmpty()) {
+                long lastLogical = logicalOffsets.get(logicalOffsets.size() - 1);
+                if (logical <= lastLogical) {
+                    throw new IOException(
+                            "Corrupt index: logical offsets not strictly increasing");
+                }
+            }
 
             logicalOffsets.add(logical);
             physicalOffsets.add(physical);
@@ -53,13 +64,23 @@ public final class OffsetIndex {
 
     // -------- Append new index entry --------
     public void append(long logicalOffset, long physicalOffset) throws IOException {
-        ByteBuffer buf = ByteBuffer.allocate(ENTRY_SIZE);
-        buf.putLong(logicalOffset);
-        buf.putLong(physicalOffset);
-        buf.flip();
 
-        while (buf.hasRemaining()) {
-            channel.write(buf);
+        // Enforce monotonicity
+        if (!logicalOffsets.isEmpty()) {
+            long last = logicalOffsets.get(logicalOffsets.size() - 1);
+            if (logicalOffset <= last) {
+                throw new IllegalArgumentException(
+                        "Logical offsets must be strictly increasing");
+            }
+        }
+
+        writeBuffer.clear();
+        writeBuffer.putLong(logicalOffset);
+        writeBuffer.putLong(physicalOffset);
+        writeBuffer.flip();
+
+        while (writeBuffer.hasRemaining()) {
+            channel.write(writeBuffer);
         }
 
         logicalOffsets.add(logicalOffset);
@@ -91,6 +112,9 @@ public final class OffsetIndex {
     public long lastIndexedLogicalOffset() {
         if (logicalOffsets.isEmpty()) return -1;
         return logicalOffsets.get(logicalOffsets.size() - 1);
+    }
+    public int size() {
+        return logicalOffsets.size();
     }
 
     public void flush() throws IOException {
