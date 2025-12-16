@@ -19,7 +19,15 @@ public class DiskQueue {
     private final boolean durable;
     private int batchCounter = 0;
 
-    public DiskQueue(Path filePath, boolean durable, int maxMessageSize, int batchLimit) throws IOException {
+    private ThreadLocal<ByteBuffer> localBuffer;
+    private ThreadLocal<ByteBuffer> readBuffer;
+
+    // offset index
+    private final OffsetIndex offsetIndex;
+    private long nextLogicalOffset;
+
+
+    public DiskQueue(Path filePath,Path indexPath, boolean durable, int maxMessageSize, int batchLimit) throws IOException {
         this.writeChannel = FileChannel.open(filePath,
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND);
         this.readChannel = FileChannel.open(filePath,
@@ -29,6 +37,11 @@ public class DiskQueue {
         this.maxMessageSize = maxMessageSize;
         this.batchLimit = batchLimit;
         this.batchCounter = 0;
+
+        // Offset Index
+        this.offsetIndex = new OffsetIndex(indexPath);
+        long last = offsetIndex.lastIndexedLogicalOffset();
+        this.nextLogicalOffset = (last == -1) ? 0 : last + 1;
 
         this.localBuffer = ThreadLocal.withInitial(
                 () -> ByteBuffer.allocateDirect(maxMessageSize + 4)
@@ -40,13 +53,13 @@ public class DiskQueue {
     }
 
 
-    public DiskQueue(Path filePath, boolean durable) throws IOException {
-        this(filePath, durable, MAX_MESSAGE_SIZE, BATCH_LIMIT);
+    public DiskQueue(Path filePath, Path indexPath, boolean durable) throws IOException {
+        this(filePath, indexPath, durable, MAX_MESSAGE_SIZE, BATCH_LIMIT);
     }
 
 
-    private ThreadLocal<ByteBuffer> localBuffer;
-    private ThreadLocal<ByteBuffer> readBuffer;
+
+
 
 
 
@@ -55,6 +68,9 @@ public class DiskQueue {
 
         if (length > maxMessageSize)
             throw new IOException("Message too large: " + length);
+
+        // 🔹 NEW: capture physical offset BEFORE write
+        long physicalOffset = writeChannel.position();
 
         ByteBuffer buffer = localBuffer.get();
         buffer.clear();              // reset for this write
@@ -65,6 +81,10 @@ public class DiskQueue {
         while (buffer.hasRemaining()) {
             writeChannel.write(buffer);
         }
+
+        // 🔹 NEW: logical offset + index append
+        long logicalOffset = nextLogicalOffset++;
+        offsetIndex.append(logicalOffset, physicalOffset);
 
         if (durable) {
             batchCounter++;
