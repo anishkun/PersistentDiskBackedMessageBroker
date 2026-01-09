@@ -31,3 +31,14 @@ desktop.ini
 # Environment / credentials (if any)
 # ------------------------------
 *.en*
+
+# DiskQueue / benchmark runtime files
+benchmark_queue.dat
+benchmark_queue.idx
+queue.log
+queue.idx
+
+# (optional but recommended) ignore all similar files
+*.dat
+*.idx
+*.log

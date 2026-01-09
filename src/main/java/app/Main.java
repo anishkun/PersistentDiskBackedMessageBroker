@@ -7,7 +7,12 @@ public class Main {
     public static void main(String[] args) {
         try {
             // Create queue with durability enabled (true)
-            DiskQueue queue = new DiskQueue(Paths.get("queue.log"), true);
+            DiskQueue queue = new DiskQueue(
+                    Paths.get("queue.log"),
+                    Paths.get("queue.idx"),
+                    true
+            );
+
 
             // Writing a few messages
             queue.enqueue("Hello, World!");
@@ -22,7 +27,12 @@ public class Main {
             queue.close();
 
             // Reopen queue for reading
-            queue = new DiskQueue(Paths.get("queue.log"), true);
+            queue = new DiskQueue(
+                    Paths.get("queue.log"),
+                    Paths.get("queue.idx"),
+                    true
+            );
+
 
             // Reading messages back
             byte[] msg;

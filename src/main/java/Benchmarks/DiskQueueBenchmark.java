@@ -16,6 +16,7 @@ public class DiskQueueBenchmark {
 
     public static void main(String[] args) throws Exception {
         Path path = Path.of("benchmark_queue.dat");
+        Path indexPath = Path.of("benchmark_queue.idx");
 
         int messages = 10_000;
         int messageSize = 10 * 1024;  // 10 KB messages
@@ -24,7 +25,7 @@ public class DiskQueueBenchmark {
         int batchLimit = 100;
         int maxMessageSize = 10 * 1024 * 1024;
 
-        DiskQueue queue = new DiskQueue(path, durable, maxMessageSize, batchLimit);
+        DiskQueue queue = new DiskQueue(path,indexPath, durable, maxMessageSize, batchLimit);
 
         // ----------------------------------------
         // GENERATE ALL MESSAGES BEFORE BENCHMARK
