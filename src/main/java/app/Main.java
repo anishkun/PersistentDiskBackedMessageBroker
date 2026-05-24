@@ -37,7 +37,7 @@ public class Main {
             // Reading messages back
             byte[] msg;
             while ((msg = queue.dequeue()) != null) {
-                System.out.println("Read from disk: " + msg);
+                System.out.println("Read from disk: " + new String(msg, java.nio.charset.StandardCharsets.UTF_8));
             }
 
             queue.close();

@@ -19,10 +19,19 @@ public final class OffsetIndex {
     private final FileChannel channel;
 
     // In-memory sparse index (monotonic)
-    private final List<Long> logicalOffsets = new ArrayList<>();
-    private final List<Long> physicalOffsets = new ArrayList<>();
+    private long[] logicalOffsets = new long[1024];
+    private long[] physicalOffsets = new long[1024];
+    private int size = 0;
     private final ByteBuffer readBuffer  = ByteBuffer.allocate(ENTRY_SIZE);
     private final ByteBuffer writeBuffer = ByteBuffer.allocate(ENTRY_SIZE);
+
+    private void ensureCapacity() {
+        if (size == logicalOffsets.length) {
+            int newCapacity = logicalOffsets.length * 2;
+            logicalOffsets = java.util.Arrays.copyOf(logicalOffsets, newCapacity);
+            physicalOffsets = java.util.Arrays.copyOf(physicalOffsets, newCapacity);
+        }
+    }
 
     public OffsetIndex(Path indexFile) throws IOException {
         this.channel = FileChannel.open(indexFile, CREATE, READ, WRITE);
@@ -31,11 +40,11 @@ public final class OffsetIndex {
 
     // -------- Startup loading --------
     private void loadExistingEntries() throws IOException {
-        long size = channel.size();
+        long fileSize = channel.size();
 
         // Truncate partial entry (crash safety)
-        if (size % ENTRY_SIZE != 0) {
-            channel.truncate(size - (size % ENTRY_SIZE));
+        if (fileSize % ENTRY_SIZE != 0) {
+            channel.truncate(fileSize - (fileSize % ENTRY_SIZE));
         }
 
         channel.position(0);
@@ -49,16 +58,18 @@ public final class OffsetIndex {
             long physical = readBuffer.getLong();
 
             // Monotonicity check (defensive)
-            if (!logicalOffsets.isEmpty()) {
-                long lastLogical = logicalOffsets.get(logicalOffsets.size() - 1);
+            if (size > 0) {
+                long lastLogical = logicalOffsets[size - 1];
                 if (logical <= lastLogical) {
                     throw new IOException(
                             "Corrupt index: logical offsets not strictly increasing");
                 }
             }
 
-            logicalOffsets.add(logical);
-            physicalOffsets.add(physical);
+            ensureCapacity();
+            logicalOffsets[size] = logical;
+            physicalOffsets[size] = physical;
+            size++;
         }
     }
 
@@ -66,8 +77,8 @@ public final class OffsetIndex {
     public void append(long logicalOffset, long physicalOffset) throws IOException {
 
         // Enforce monotonicity
-        if (!logicalOffsets.isEmpty()) {
-            long last = logicalOffsets.get(logicalOffsets.size() - 1);
+        if (size > 0) {
+            long last = logicalOffsets[size - 1];
             if (logicalOffset <= last) {
                 throw new IllegalArgumentException(
                         "Logical offsets must be strictly increasing");
@@ -83,23 +94,25 @@ public final class OffsetIndex {
             channel.write(writeBuffer);
         }
 
-        logicalOffsets.add(logicalOffset);
-        physicalOffsets.add(physicalOffset);
+        ensureCapacity();
+        logicalOffsets[size] = logicalOffset;
+        physicalOffsets[size] = physicalOffset;
+        size++;
     }
 
     // -------- Lookup: floor(logicalOffset) --------
     public long lookupFloor(long targetLogicalOffset) {
         int low = 0;
-        int high = logicalOffsets.size() - 1;
+        int high = size - 1;
 
         long resultPhysical = -1;
 
         while (low <= high) {
             int mid = (low + high) >>> 1;
-            long midLogical = logicalOffsets.get(mid);
+            long midLogical = logicalOffsets[mid];
 
             if (midLogical <= targetLogicalOffset) {
-                resultPhysical = physicalOffsets.get(mid);
+                resultPhysical = physicalOffsets[mid];
                 low = mid + 1;
             } else {
                 high = mid - 1;
@@ -110,11 +123,11 @@ public final class OffsetIndex {
     }
 
     public long lastIndexedLogicalOffset() {
-        if (logicalOffsets.isEmpty()) return -1;
-        return logicalOffsets.get(logicalOffsets.size() - 1);
+        if (size == 0) return -1;
+        return logicalOffsets[size - 1];
     }
     public int size() {
-        return logicalOffsets.size();
+        return size;
     }
 
     public void flush() throws IOException {

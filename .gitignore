@@ -42,3 +42,4 @@ queue.idx
 *.dat
 *.idx
 *.log
+*.consumer

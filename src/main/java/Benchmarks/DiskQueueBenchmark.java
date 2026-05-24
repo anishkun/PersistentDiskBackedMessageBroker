@@ -84,6 +84,8 @@ public class DiskQueueBenchmark {
         System.out.println("\n------ END TO END ------");
         System.out.println("Total Time: " + totalTime + " ms");
         System.out.println("End-to-end Throughput: " + (messages * 1000L / totalTime) + " msg/sec");
+        
+        queue.close();
     }
 }
 
